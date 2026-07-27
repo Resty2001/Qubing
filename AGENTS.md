@@ -2,12 +2,12 @@
 
 ## Project Identity
 
-Project name: Qubing  
-Engine: Unity 6000.3.3f1  
-Language: C#  
-Primary target: Android/iOS mobile  
-Secondary test target: Windows  
-Genre: Turn-based puzzle / survival arena  
+Project name: Qubing
+Engine: Unity 6000.3.3f1
+Language: C#
+Primary target: Android/iOS mobile
+Secondary test target: Windows
+Genre: Turn-based puzzle / survival arena
 Current stage: Working prototype, improving systems, UI, and long-run depth.
 
 Qubing is a 7x7 turn-based dice-cube puzzle survival game. The player rolls a cube, accumulates charge on physical dice faces, kills color-matched enemies, manages a turn gauge, and survives enemy waves.

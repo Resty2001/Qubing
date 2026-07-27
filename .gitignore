@@ -50,3 +50,5 @@ crashlytics-build.properties
 # Unity temporary exported data
 ExportedObj/
 .consulo/
+
+.utmp/
