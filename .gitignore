@@ -34,6 +34,7 @@
 *.mdb
 *.opendb
 *.VC.db
+*.slnx
 
 # OS generated files
 .DS_Store

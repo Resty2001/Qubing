@@ -4,7 +4,7 @@
     "references": [
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "NewAssembly"
+        "GUID:3cc13945ff885124c95b590e2d1853f9"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

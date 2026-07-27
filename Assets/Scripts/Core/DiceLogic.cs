@@ -9,6 +9,7 @@ public class DiceFace
 {
     public string name;
     public DiceColor color;
+    public DiceFaceId faceId;
     public int charge;
 
     public TextMeshPro textMesh; 
@@ -65,14 +66,29 @@ public class DiceLogic : MonoBehaviour
 
     void InitializeDice()
     {
-        topFace.name = "Top";       topFace.color = DiceColor.Red;
-        bottomFace.name = "Bottom"; bottomFace.color = DiceColor.Red;
+        topFace.name = "Top";
+        topFace.color = DiceColor.Red;
+        topFace.faceId = DiceFaceId.InitialTop;
+
+        bottomFace.name = "Bottom";
+        bottomFace.color = DiceColor.Red;
+        bottomFace.faceId = DiceFaceId.InitialBottom;
         
-        northFace.name = "North";   northFace.color = DiceColor.Green;
-        southFace.name = "South";   southFace.color = DiceColor.Green;
+        northFace.name = "North";
+        northFace.color = DiceColor.Green;
+        northFace.faceId = DiceFaceId.InitialNorth;
+
+        southFace.name = "South";
+        southFace.color = DiceColor.Green;
+        southFace.faceId = DiceFaceId.InitialSouth;
         
-        eastFace.name = "East";     eastFace.color = DiceColor.Blue;
-        westFace.name = "West";     westFace.color = DiceColor.Blue;
+        eastFace.name = "East";
+        eastFace.color = DiceColor.Blue;
+        eastFace.faceId = DiceFaceId.InitialEast;
+
+        westFace.name = "West";
+        westFace.color = DiceColor.Blue;
+        westFace.faceId = DiceFaceId.InitialWest;
     }
 
     public void UpdateFaces(Vector2Int direction, bool isCombat)
@@ -155,5 +171,23 @@ public class DiceLogic : MonoBehaviour
         if (direction == Vector2Int.right) return eastFace;
         if (direction == Vector2Int.left) return westFace;
         return null; 
+    }
+
+    public int GetCurrentOrientationIndex()
+    {
+        return OrientationTable.GetIndex(topFace.faceId, northFace.faceId);
+    }
+
+    public int GetCharge(DiceFaceId faceId)
+    {
+        if (topFace.faceId == faceId) return topFace.charge;
+        if (bottomFace.faceId == faceId) return bottomFace.charge;
+        if (northFace.faceId == faceId) return northFace.charge;
+        if (southFace.faceId == faceId) return southFace.charge;
+        if (eastFace.faceId == faceId) return eastFace.charge;
+        if (westFace.faceId == faceId) return westFace.charge;
+
+        throw new System.ArgumentOutOfRangeException(
+            nameof(faceId), faceId, "No current dice face has the requested physical face ID.");
     }
 }
