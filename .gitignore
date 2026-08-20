@@ -53,3 +53,6 @@ ExportedObj/
 .consulo/
 
 .utmp/
+
+# Local Unity Test Framework output
+/TestResults/
