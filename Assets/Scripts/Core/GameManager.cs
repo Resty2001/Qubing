@@ -7,6 +7,7 @@ using UnityEngine.SceneManagement;
 public class GameManager : MonoBehaviour
 {
     private const int BoardSize = 7;
+    private const int DiceFaceCount = 6;
 
     public static GameManager Instance;
 
@@ -36,7 +37,20 @@ public class GameManager : MonoBehaviour
     [Header("Game Objects")]
     public GameObject enemyPrefab;
     public GameObject explosionPrefab;
-    public DiceController playerController; 
+    public DiceController playerController;
+    [SerializeField] private DiceLogic diceLogic;
+
+    [Header("Soft Lock")]
+    [SerializeField] private int softLockCheckInterval = 4;
+    [SerializeField] private int softLockWarningMaxActions = 3;
+    [SerializeField] private GameObject softLockWarningPanel;
+    [SerializeField] private TextMeshProUGUI txtSoftLockWarning;
+
+    private SoftLockDetector _softLockDetector;
+    private int[] _softLockChargeBuffer;
+    private List<SoftLockEnemySnapshot> _softLockEnemyBuffer;
+    private SoftLockWarningState _softLockWarningState;
+    private System.Func<bool> _evaluateSoftLockCallback;
 
     [Header("Board Settings")]
     public GameObject tilePrefab; 
@@ -44,6 +58,19 @@ public class GameManager : MonoBehaviour
     private readonly GameObject[,] boardTiles = new GameObject[BoardSize, BoardSize];
     
     public List<Enemy> activeEnemies = new List<Enemy>();
+
+    public bool IsSoftLockWarningActive =>
+        _softLockWarningState != null && _softLockWarningState.IsWarningActive;
+
+    public int SoftLockWarningActionsRemaining =>
+        _softLockWarningState != null
+            ? _softLockWarningState.WarningActionsRemaining
+            : 0;
+
+    public int SoftLockCheckActionCounter =>
+        _softLockWarningState != null
+            ? _softLockWarningState.CheckActionCounter
+            : 0;
 
     void Awake()
     {
@@ -54,6 +81,19 @@ public class GameManager : MonoBehaviour
         }
 
         Instance = this;
+
+        if (diceLogic == null && playerController != null)
+        {
+            diceLogic = playerController.GetComponent<DiceLogic>();
+        }
+
+        _softLockDetector = new SoftLockDetector();
+        _softLockChargeBuffer = new int[DiceFaceCount];
+        _softLockEnemyBuffer = new List<SoftLockEnemySnapshot>(48);
+        _softLockWarningState = new SoftLockWarningState(
+            Mathf.Max(1, softLockCheckInterval),
+            Mathf.Max(1, softLockWarningMaxActions));
+        _evaluateSoftLockCallback = EvaluateSoftLock;
     }
 
     void Start()
@@ -64,11 +104,14 @@ public class GameManager : MonoBehaviour
 
         if(gameOverPanel != null) gameOverPanel.SetActive(false);
         if(settingsPanel != null) settingsPanel.SetActive(false);
+        UpdateSoftLockWarningUI();
     }
 
     public void OnPlayerMove(Vector2Int futurePos, bool isCombat)
     {
         if (isGameOver) return;
+
+        bool successfulKill = killHappenedThisTurn;
 
         // 콤보 로직
         if (killHappenedThisTurn) killHappenedThisTurn = false; 
@@ -83,14 +126,47 @@ public class GameManager : MonoBehaviour
             currentTurnGauge++;
         }
 
+        bool waveSpawnedThisAction = false;
         if (currentTurnGauge >= maxTurnGauge)
         {
-            SpawnEnemyWave(futurePos);
+            waveSpawnedThisAction = SpawnEnemyWave(futurePos);
             currentTurnGauge = 0;
         }
         
-        UpdateUI(); 
-        CheckGameOverCondition();
+        UpdateUI();
+
+        if (isGameOver)
+        {
+            return;
+        }
+
+        bool hardLocked =
+            playerController != null && playerController.CheckIfTrapped();
+        bool warningWasActive = IsSoftLockWarningActive;
+        int previousWarningActions = SoftLockWarningActionsRemaining;
+
+        SoftLockActionOutcome outcome = _softLockWarningState.ProcessAction(
+            successfulAction: true,
+            successfulKill: successfulKill,
+            waveChangedBoard: waveSpawnedThisAction,
+            hardLocked: hardLocked,
+            gameOverAlready: isGameOver,
+            evaluateSoftLock: _evaluateSoftLockCallback);
+
+        LogSoftLockStateChange(warningWasActive, previousWarningActions);
+        UpdateSoftLockWarningUI();
+
+        if (outcome == SoftLockActionOutcome.TriggerTrappedGameOver)
+        {
+            TriggerGameOver("TRAPPED!");
+            return;
+        }
+
+        if (outcome == SoftLockActionOutcome.TriggerSoftLockGameOver)
+        {
+            Debug.Log("[SoftLock] Final check failed - game over");
+            TriggerGameOver("SOFT LOCK");
+        }
     }
 
     public void RemoveEnemy(Enemy enemy)
@@ -102,6 +178,7 @@ public class GameManager : MonoBehaviour
 
             currentCombo++;
             killHappenedThisTurn = true;
+            ClearSoftLockWarning();
 
             if (explosionPrefab != null) {
                 GameObject vfx = Instantiate(explosionPrefab, enemy.transform.position, Quaternion.identity);
@@ -143,7 +220,7 @@ public class GameManager : MonoBehaviour
         SpawnEnemyAt(GetRandomSpawnPos(new Vector2Int(3,3)), 2, DiceColor.Blue, false);
     }
 
-    void SpawnEnemyWave(Vector2Int avoidPos) 
+    bool SpawnEnemyWave(Vector2Int avoidPos)
     {
         float progress = Mathf.Clamp01((float)totalTurns / 100f);
         difficultyMultiplier = Mathf.Lerp(0.7f, 1.3f, progress);
@@ -168,7 +245,7 @@ public class GameManager : MonoBehaviour
             if (pos.x == -1) 
             {
                 TriggerGameOver("MAP FULL!");
-                return;
+                return currentWaveSpawnCount > 0;
             }
 
             int maxPossibleHP = Mathf.Min(6, spawnBudget);
@@ -184,6 +261,8 @@ public class GameManager : MonoBehaviour
             spawnBudget -= enemyHP;
             currentWaveSpawnCount++; 
         }
+
+        return currentWaveSpawnCount > 0;
     }
 
     // [수정됨] addToBalance 파라미터 추가 (기본값 true)
@@ -236,15 +315,6 @@ public class GameManager : MonoBehaviour
         Application.Quit(); 
     }
 
-    void CheckGameOverCondition()
-    {
-        if (isGameOver) return;
-        if (playerController.CheckIfTrapped())
-        {
-            TriggerGameOver("TRAPPED!");
-        }
-    }
-
     void TriggerGameOver(string reason)
     {
         isGameOver = true;
@@ -252,6 +322,113 @@ public class GameManager : MonoBehaviour
         {
             gameOverPanel.SetActive(true);
             if (txtFinalScore != null) txtFinalScore.text = $"SCORE\n<color=yellow>{currentScore:D5}</color>";
+        }
+    }
+
+    private bool EvaluateSoftLock()
+    {
+        if (isGameOver)
+        {
+            return false;
+        }
+
+        if (playerController == null || diceLogic == null)
+        {
+            Debug.LogWarning(
+                "[SoftLock] Check skipped because playerController or diceLogic is not assigned.");
+            return false;
+        }
+
+        Debug.Log("[SoftLock] Check start");
+
+        for (int face = 0; face < DiceFaceCount; face++)
+        {
+            _softLockChargeBuffer[face] = diceLogic.GetCharge((DiceFaceId)face);
+        }
+
+        _softLockEnemyBuffer.Clear();
+        for (int index = 0; index < activeEnemies.Count; index++)
+        {
+            Enemy enemy = activeEnemies[index];
+            if (enemy == null)
+            {
+                continue;
+            }
+
+            _softLockEnemyBuffer.Add(
+                new SoftLockEnemySnapshot(
+                    enemy.gridPos,
+                    enemy.myColor,
+                    enemy.currentHP));
+        }
+
+        bool softLocked = _softLockDetector.IsSoftLocked(
+            playerController.GetCurrentPosition(),
+            diceLogic.GetCurrentOrientationIndex(),
+            _softLockChargeBuffer,
+            _softLockEnemyBuffer);
+
+        Debug.Log(softLocked
+            ? "[SoftLock] Current static board is softlocked"
+            : "[SoftLock] Escape route exists");
+        return softLocked;
+    }
+
+    private void ClearSoftLockWarning()
+    {
+        if (_softLockWarningState == null)
+        {
+            return;
+        }
+
+        bool warningWasActive = _softLockWarningState.IsWarningActive;
+        _softLockWarningState.ClearAfterKill();
+        if (warningWasActive)
+        {
+            Debug.Log("[SoftLock] Warning cleared");
+        }
+
+        UpdateSoftLockWarningUI();
+    }
+
+    private void UpdateSoftLockWarningUI()
+    {
+        bool warningActive = IsSoftLockWarningActive;
+        if (softLockWarningPanel != null)
+        {
+            softLockWarningPanel.SetActive(warningActive);
+        }
+
+        if (txtSoftLockWarning != null)
+        {
+            txtSoftLockWarning.text = warningActive
+                ? $"DANGER\nDefeat an enemy within {SoftLockWarningActionsRemaining} actions"
+                : string.Empty;
+        }
+    }
+
+    private void LogSoftLockStateChange(
+        bool warningWasActive,
+        int previousWarningActions)
+    {
+        if (!warningWasActive && IsSoftLockWarningActive)
+        {
+            Debug.Log(
+                $"[SoftLock] Warning started: {SoftLockWarningActionsRemaining} actions");
+            return;
+        }
+
+        if (warningWasActive && !IsSoftLockWarningActive)
+        {
+            Debug.Log("[SoftLock] Warning cleared");
+            return;
+        }
+
+        if (IsSoftLockWarningActive &&
+            previousWarningActions != SoftLockWarningActionsRemaining)
+        {
+            Debug.Log(
+                $"[SoftLock] Warning remaining: {SoftLockWarningActionsRemaining}");
         }
     }
 
